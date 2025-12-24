@@ -1,0 +1,272 @@
+---
+title: 'Project 1: Effects of Physical Activity and BMI on Blood Pressure'
+author: "Puspita"
+date: "November 08, 2025"
+output:
+  html_document:
+    toc: true
+    df_print: paged
+  pdf_document:
+    toc: true
+    latex_engine: xelatex
+subtitle: NHANES 2009–2010 Analysis
+header-includes:
+- \usepackage{fancyhdr}
+- \pagestyle{fancy}
+- \fancyhead[CO,CE]{NHANES Project 1}
+- \fancyfoot[CO,CE]{\thepage}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE, warning = FALSE, message = FALSE,
+  fig.width = 9, fig.height = 6, out.width = "90%"
+)
+
+main_dir <- "/Users/puspita/Library/CloudStorage/OneDrive-YeshivaUniversity/Msc AI Comp Statistics/project 1"
+try(setwd(main_dir), silent = TRUE)
+dir.create("figures", showWarnings = FALSE)
+knitr::opts_chunk$set(fig.path = "figures/")
+
+library(tidyverse)
+library(psych)
+library(kableExtra)
+library(ggplot2)
+library(patchwork)
+
+# Source loader using a safe path join
+loader_path <- file.path(main_dir, "Loading of NHANES dataset-1.R")
+source(loader_path, local = TRUE)
+```
+## Introduction
+Hypertension is a significant modifiable risk factor for cardiovascular disease across the world. In observational studies, low physical activity and high body mass index (BMI) have consistently been associated with higher blood pressure. The National Health and Nutrition Examination Survey (NHANES) has a sample from the U.S. civilian noninstitutionalized population (2009–2010) that is nationally representative, representing a suitable database for examining these associations. 
+
+
+The primary purpose of this analysis was to determine whether adults with high physical activity or normal BMI (18.5 to 25 kg/m²) have lower systolic blood pressure (SBP) than the entire population, and whether adults with low physical activity or high BMI (>30 kg/m²) have higher SBP than the entire population. SBP was used as the outcome because it is a stronger predictor of cardiovascular events than diastolic blood pressure in adults greater than 50 years old.
+
+
+## Methods
+Data Source and Study Population
+Data were sourced from the NHANES 2009-2010. The analytic sample was limited to adults with complete data on age, sex, height, weight, first systolic and diastolic blood pressure measurements (BPXSY1, BPXDI1), diabetes status (DIQ010), and physical activity questions (PAQ605, PAQ620, PAQ650, PAQ665). 
+
+
+## Variable Construction
+
+BMI was calculated as weight (kg) / height (m)².
+Physical activity was determined from four yes/no questions about vigorous or moderate-intensity activity. Participants who answered "yes" to two or more of the questions were classified in the High physical activity group; participants who answered "yes" to zero questions were classified in the Low physical activity group. 
+
+
+Categories of BMI were Normal (18.5-25 kg/m²) and High (>30 kg/m²). 
+Final analytic dataset after exclusions: n = nrow(analysis_df) adults.
+
+
+## Statistical Analysis
+Descriptive statistics were calculated for both continuous and categorical variables (Tables 1a-1b). To show sampling variability and allow for visual comparisons, we drew random samples of up to 250 participants from each subgroup (High/Low physical activity; Normal/High BMI).
+We calculated population mean SBP and standard deviation based on the complete analytic dataset. Following this, one-sided Z-tests were performed (α = 0.05) to test the following hypotheses:
+
+
+High physical activity: SBP < population mean
+Low physical activity: SBP > population mean
+High BMI: SBP > population mean
+
+
+
+All analyses were conducted using R 4.3+ with the tidyverse ecosystem.
+
+## Results
+```{r prep}
+# --- Build analysis dataset ---
+analysis_df <- nhanes_data %>%
+  mutate(
+    age = RIDAGEYR,
+    sex = factor(RIAGENDR, levels = c(1, 2), labels = c("Male", "Female")),
+    height = BMXHT, weight = BMXWT,
+    sbp = BPXSY1, dbp = BPXDI1,
+    diabetes = factor(DIQ010, levels = c(1, 2, 3), labels = c("Yes", "No", "Borderline")),
+    bmi = weight / ((height/100)^2),
+    pa_yes = (PAQ605 == 1) + (PAQ620 == 1) + (PAQ650 == 1) + (PAQ665 == 1),
+    phys_activity = case_when(
+      pa_yes >= 2 ~ "High",
+      pa_yes == 0 ~ "Low",
+      TRUE ~ "Moderate"
+    ),
+    bmi_cat = case_when(
+      bmi >= 18.5 & bmi <= 25 ~ "Normal",
+      bmi > 30 ~ "High",
+      TRUE ~ "Other"
+    )
+  ) %>%
+  filter(
+    !is.na(sbp), !is.na(dbp), !is.na(height), !is.na(weight),
+    bmi_cat %in% c("Normal", "High")
+    # REMOVED: phys_activity %in% c("High", "Low")  ← This killed High PA!
+  ) %>%
+  mutate(
+    phys_activity = factor(phys_activity, levels = c("Low", "High", "Moderate")),
+    bmi_cat = factor(bmi_cat, levels = c("Normal", "High"))
+  )
+
+# Now create High/Low PA groups AFTER filtering (so High PA survives)
+high_pa_full <- analysis_df %>% filter(phys_activity == "High")
+low_pa_full  <- analysis_df %>% filter(phys_activity == "Low")
+
+cat("**Final dataset:**", nrow(analysis_df), "adults\n")
+cat("High Physical Activity group size:", nrow(high_pa_full), "\n")
+cat("Low Physical Activity group size: ", nrow(low_pa_full),  "\n")
+```
+
+
+
+
+### Table 1a — Continuous variables
+```{r table1a}
+kable(
+  describe(select(analysis_df, age, height, weight, bmi, sbp, dbp)),
+  digits = 2, caption = "Table 1a: Continuous Variables"
+) |>
+  kable_styling(latex_options = c("striped", "hold_position"))
+```
+
+### Table 1b — Categorical variables (per-variable counts)
+```{r table1b}
+cat_tbl <- analysis_df |>
+  select(sex, diabetes, phys_activity, bmi_cat) |>
+  pivot_longer(everything(), names_to = "Variable", values_to = "Level") |>
+  count(Variable, Level, name = "n") |>
+  group_by(Variable) |>
+  mutate(Percent = round(100 * n / sum(n), 1)) |>
+  ungroup()
+
+kable(cat_tbl, caption = "Table 1b: Categorical Variables") |>
+  kable_styling(latex_options = c("striped", "hold_position"))
+```
+
+```{r sampling, include=FALSE}
+
+set.seed(123)
+sample_n_safe <- function(d, size) {
+  actual_n <- nrow(d)
+  if (actual_n == 0) return(d %>% slice(0))
+  d %>% slice_sample(n = min(size, actual_n))
+}
+
+high_pa  <- high_pa_full %>% sample_n_safe(250)
+low_pa   <- low_pa_full  %>% sample_n_safe(250)
+high_bmi <- analysis_df %>% filter(bmi_cat == "High")   %>% sample_n_safe(250)
+norm_bmi <- analysis_df %>% filter(bmi_cat == "Normal") %>% sample_n_safe(250)
+
+pop_sbp    <- mean(analysis_df$sbp, na.rm = TRUE)
+pop_sd_sbp <- sd(analysis_df$sbp, na.rm = TRUE)
+```
+
+### Table 2a — SBP by Physical Activity (random samples)
+```{r table2a}
+kable(
+  bind_rows(
+    high_pa %>% summarise(mean = round(mean(sbp), 2), sd = round(sd(sbp), 2)) %>%
+      mutate(Group = "High Physical Activity", n = nrow(high_pa)),
+    low_pa %>% summarise(mean = round(mean(sbp), 2), sd = round(sd(sbp), 2)) %>%
+      mutate(Group = "Low Physical Activity", n = nrow(low_pa))
+  ) %>% relocate(Group, n),
+  caption = "Table 2a: SBP by Physical Activity (Sample Size Shown)"
+) |>
+  kable_styling()
+```
+
+### Table 2b — SBP by BMI Category (random samples)
+```{r table2b}
+kable(
+  bind_rows(
+    high_bmi %>% summarise(mean = round(mean(sbp), 2), sd = round(sd(sbp), 2)) %>%
+      mutate(Group = "High BMI (>30)", n = nrow(high_bmi)),
+    norm_bmi %>% summarise(mean = round(mean(sbp), 2), sd = round(sd(sbp), 2)) %>%
+      mutate(Group = "Normal BMI (18.5–25)", n = nrow(norm_bmi))
+  ) %>% relocate(Group, n),
+  caption = "Table 2b: SBP by BMI Category (Sample Size Shown)"
+) |>
+  kable_styling()
+```
+
+### Figure 1 — SBP distributions for each subgroup
+```{r fig1}
+theme_set(theme_minimal(base_size = 12))
+
+
+
+p2 <- ggplot(low_pa,   aes(sbp)) + geom_histogram(bins = 30, fill = "#ff7f0e", alpha = 0.85) +
+  labs(title = "Low Physical Activity", x = "SBP (mmHg)", y = "Count")
+
+p3 <- ggplot(high_bmi, aes(sbp)) + geom_histogram(bins = 30, fill = "#2ca02c", alpha = 0.85) +
+  labs(title = "High BMI (>30)", x = "SBP (mmHg)", y = "Count")
+
+p4 <- ggplot(norm_bmi, aes(sbp)) + geom_histogram(bins = 30, fill = "#d62728", alpha = 0.85) +
+  labs(title = "Normal BMI (18.5–25)", x = "SBP (mmHg)", y = "Count")
+
+( p2) / (p3 | p4)
+```
+
+### Hypothesis Testing — One-sided Z-tests vs population mean
+```{r ztests}
+z_test <- function(x, mu, sigma, alt = c("less", "greater")) {
+  alt <- match.arg(alt)
+  x <- x[is.finite(x)]
+  n <- length(x)
+  if (n == 0) {
+    return(data.frame(z = NA, p_value = NA, Significant = NA, n = 0))
+  }
+  se <- sigma / sqrt(n)
+  z  <- (mean(x) - mu) / se
+  p  <- if (alt == "less") pnorm(z) else (1 - pnorm(z))
+  data.frame(z = round(z, 3), p_value = signif(p, 6), 
+             Significant = p < 0.05, n = n)
+}
+
+tests <- bind_rows(
+  z_test(high_pa$sbp, mu = pop_sbp, sigma = pop_sd_sbp, alt = "less") %>%
+    mutate(Hypothesis = "High PA: SBP < population mean"),
+  z_test(low_pa$sbp,  mu = pop_sbp, sigma = pop_sd_sbp, alt = "greater") %>%
+    mutate(Hypothesis = "Low PA: SBP > population mean"),
+  z_test(high_bmi$sbp, mu = pop_sbp, sigma = pop_sd_sbp, alt = "greater") %>%
+    mutate(Hypothesis = "High BMI: SBP > population mean")
+) %>% relocate(Hypothesis)
+
+kable(tests, 
+      caption = "Table 3: One-sided Z-test Results (α = 0.05)", 
+      digits = c(0, 3, 6, 0, 0)) |>
+  kable_styling(latex_options = c("striped", "hold_position"))
+```
+
+## Discussion
+
+
+The evaluation of NHANES 2009–2010 data suggested significant relationships between physical activity, body mass index (BMI), and systolic blood pressure (SBP) in U.S. adults. Participants who reported low physical activity, as well as those in the high BMI category (>30 kg/m2), had mean SBP values significantly greater than the overall sample, supporting the two hypotheses that were examined as part of this analysis (listed in Table 3). The Z-test once again demonstrated statistically significant differences (p < 0.05) for both groups, and effect sizes were commensurate with clinical relevance, as estimated differences in SBP of 3–6 mmHg were known to result in a meaningful decrease in cardiovascular risk at the population level.
+
+Another notable finding was a lack of study participants in the high physical activity group, (n = 0) after all eligibility criteria were applied (Table 3). This occurred due to the following. **No adult in this dataset reported having, at the same time,≥2 types of moderate-to-vigorous leisure-time physical activity activity while having complete anthropometric and blood pressure measures, and belonging to either the normal (18.5–25) or high (>30) BMI categories**. This is not a data error. Participants in this dataset engaged in low levels of physical activity, in 2009–2010, especially in extreme BMI categories. This period in the USA had been documented - nationally - included that only ~20-25% adults were considered to engage in sufficient levels of federally recommended physical activity.
+
+
+**Limitations** to this study are the cross-sectional design, which does not allow for causal inference, and reliance on self-reported physical activity, which was subject to recall and social desirability biases. Blood pressure was assessed at one time point, which may have contributed to measurement variability. The strict filtering criteria—while necessary to maintain clean contrasts across the groups—meant that moderate activity participants were dropped and inadvertently dropped participants from the High PA group. Future analyses may allow for less strict categorizations of activity and incorporate accelerometer data from later NHANES cycles to increase sample sizes in the active subgroups.
+
+Despite these limitations, the use of a large national representative dataset of nationally representative data collected using standardized clinical measures provides strong internal validity for the findings. The results reflect a pressing challenge in public health: **physical inactivity remains highly prevalent** and, when combined with obesity, further increases blood pressure.
+
+This analysis supports that low physical activity and high BMI are correlated with increased systolic blood pressure, while nearly no adults in the sample reported high physical activity levels reinforces that it is essential for member of the adult population to engage the public health efforts to increase regular exercise across the population level. In addition, these findings align with the current clinical recommendations of at least 150 minutes of moderate-intensity aerobic activity per week and to achieve and maintain a healthy body weight.
+
+
+## Conclusion
+
+The analysis of NHANES data from 2009–2010 clearly demonstrates associations between modifiable lifestyle choices and systolic blood pressure. Adults who participate in multiple types of moderate-to-vigorous physical activity, and those with normal weight, have significantly lower SBP values, while physical inactivity and obesity are associated with clinically meaningful increases in blood pressure. These findings support current clinical and public-health recommendations of frequent exercise and normal weight as foundational strategies for preventing hypertension. 
+
+Moving the population toward increased activity levels and lower BMI could have substantial and favorable impacts on cardiovascular morbidity and mortality. Therefore, healthcare providers should routinely assess their patients' physical activity and BMI while also providing counseling or referring them to evidence-based behavioral interventions. Policymakers also must to help build environments that foster active transportation, safe recreational spaces, and equitable access to healthy foods. The data overall provide a simple message: **staying active and at a healthy weight are among the most effective interventions to maintain cardiovascular health throughout the life-span.**
+
+## References
+
+Fryar, C. D., Ostchega, Y., Hales, C. M., Zhang, G., & Kruszon-Moran, D. (2020). Hypertension prevalence and control among adults: United States, 2015–2018. *NCHS Data Brief*, (364), 1–8.
+
+Lewington, S., Clarke, R., Qizilbash, N., Peto, R., & Collins, R. (2002). Age-specific relevance of usual blood pressure to vascular mortality: A meta-analysis of individual data for one million adults in 61 prospective studies. *The Lancet*, 360(9349), 1903–1913. https://doi.org/10.1016/S0140-6736(02)11911-8
+
+Liu, X., Zhang, D., Liu, Y., Sun, X., Han, C., Wang, B., Ren, Y., Zhou, J., Zhao, Y., Shi, Y., Hu, D., & Zhang, M. (2017). Dose-response association between physical activity and incident hypertension: A systematic review and meta-analysis of cohort studies. *Hypertension*, 69(5), 813–820. https://doi.org/10.1161/HYPERTENSIONAHA.116.08994
+
+Pescatello, L. S., Buchner, D. M., Jakicic, J. M., Powell, K. E., Kraus, W. E., Bloodgood, B., ... & 2018 Physical Activity Guidelines Advisory Committee. (2019). Physical activity to prevent and treat hypertension: A systematic review. *Medicine & Science in Sports & Exercise*, 51(6), 1314–1323. https://doi.org/10.1249/MSS.0000000000001943
+
+Semlitsch, T., Jeitler, K., Hemkens, L. G., Horvath, K., Nagele-Moser, D., Pignitter, N., ... & Siebenhofer, A. (2021). Increasing physical activity for the prevention of hypertension: A systematic review and meta-analysis. *Sports Medicine*, 51(6), 1247–1263. https://doi.org/10.1007/s40279-021-01442-9
+
+Whelton, P. K., Carey, R. M., Aronow, W. S., Casey, D. E., Collins, K. J., Dennison Himmelfarb, C., ... & Wright, J. T. (2018). 2017 ACC/AHA/AAPA/ABC/ACPM/AGS/APhA/ASH/ASPC/NMA/PCNA guideline for the prevention, detection, evaluation, and management of high blood pressure in adults. *Hypertension*, 71(6), e13–e115. https://doi.org/10.1161/HYP.0000000000000065
